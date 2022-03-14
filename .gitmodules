@@ -1,0 +1,3 @@
+[submodule "lib/sipf"]
+	path = lib/sipf
+	url = https://github.com/sakura-internet/sipf-lib_nrfconnect.git
