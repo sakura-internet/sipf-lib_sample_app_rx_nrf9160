@@ -33,35 +33,17 @@ LOG_MODULE_REGISTER(sipf, CONFIG_SIPF_LOG_LEVEL);
 /** peripheral **/
 #define LED_HEARTBEAT_MS (500)
 
-#ifndef CONFIG_BOARD_SCM_LTEM1NRF_NRF9160NS
-#define LED_PORT DT_GPIO_LABEL(DT_ALIAS(led0), gpios)
+#define LED_PORT DT_GPIO_LABEL(DT_ALIAS(led_boot), gpios)
 
-#define LED_BOOT_PIN (DT_GPIO_PIN(DT_ALIAS(led0), gpios))
+#define LED_BOOT_PIN (DT_GPIO_PIN(DT_ALIAS(led_boot), gpios))
 #define LED_BOOT_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led0), gpios))
 
-#define LED_STATE_PIN (DT_GPIO_PIN(DT_ALIAS(led1), gpios))
-#define LED_STATE_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led1), gpios))
+#define LED_STATE_PIN (DT_GPIO_PIN(DT_ALIAS(led_state), gpios))
+#define LED_STATE_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led_state), gpios))
 
-#define BTN_SEND_PORT DT_GPIO_LABEL(DT_ALIAS(sw0), gpios)
-#define BTN_SEND_PIN (DT_GPIO_PIN(DT_ALIAS(sw0), gpios))
-#define BTN_SEND_FLAGS (GPIO_INPUT | DT_GPIO_FLAGS(DT_ALIAS(sw0), gpios))
-
-#define WAKE_IN_PORT DT_GPIO_LABEL(DT_ALIAS(sw2), gpios)
-#define WAKE_IN_PIN (DT_GPIO_PIN(DT_ALIAS(sw2), gpios))
-#define WAKE_IN_FLAGS (GPIO_INPUT | DT_GPIO_FLAGS(DT_ALIAS(sw2), gpios))
-#else
-#define LED_PORT DT_GPIO_LABEL(DT_ALIAS(led2), gpios)
-
-#define LED_BOOT_PIN (DT_GPIO_PIN(DT_ALIAS(led2), gpios))
-#define LED_BOOT_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led2), gpios))
-
-#define LED_STATE_PIN (DT_GPIO_PIN(DT_ALIAS(led3), gpios))
-#define LED_STATE_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led3), gpios))
-
-#define WAKE_IN_PORT DT_GPIO_LABEL(DT_ALIAS(sw2), gpios)
-#define WAKE_IN_PIN (DT_GPIO_PIN(DT_ALIAS(sw2), gpios))
-#define WAKE_IN_FLAGS (GPIO_INPUT | DT_GPIO_FLAGS(DT_ALIAS(sw2), gpios))
-#endif
+#define BTN_SEND_PORT DT_GPIO_LABEL(DT_ALIAS(btn_send), gpios)
+#define BTN_SEND_PIN (DT_GPIO_PIN(DT_ALIAS(btn_send), gpios))
+#define BTN_SEND_FLAGS (GPIO_INPUT | DT_GPIO_FLAGS(DT_ALIAS(btn_send), gpios))
 /**********/
 
 /** TLS **/
@@ -101,45 +83,6 @@ int at_comms_init(void)
 
     return 0;
 }
-
-#if 0
-#ifdef CONFIG_BOARD_SCM_LTEM1NRF_NRF9160NS
-static struct gpio_callback gpio_cb;
-
-void wake_in_assert(const struct device *gpiob, struct gpio_callback *cb, uint32_t pins)
-{
-    //リブート要求
-    UartBrokerPrint("RESET_REQ_DETECT\r\n");
-    k_sem_give(&reset_request);
-}
-
-static int wake_in_init(void)
-{
-    const struct device *dev;
-    dev = device_get_binding(WAKE_IN_PORT);
-    if (dev == 0) {
-        LOG_ERR("Nordic nRF GPIO driver was not found!");
-        return 1;
-    }
-    int ret;
-    ret = gpio_pin_configure(dev, WAKE_IN_PIN, WAKE_IN_FLAGS);
-    if (ret == 0) {
-        gpio_init_callback(&gpio_cb, wake_in_assert, BIT(WAKE_IN_PIN));
-        ret = gpio_add_callback(dev, &gpio_cb);
-        if (ret == 0) {
-            gpio_pin_interrupt_configure(dev, WAKE_IN_PIN, GPIO_INT_EDGE_TO_ACTIVE);
-        }
-    }
-
-    return 0;
-}
-#else
-static int wake_in_init(void)
-{
-    return 0;
-}
-#endif
-#endif
 
 static int button_init(void)
 {
@@ -486,14 +429,16 @@ void main(void)
 
     // 認証モードをSIM認証にする
     for (;;) {
+        UartBrokerPuts("Set AuthMode to `SIM Auth'... \r\n");
         err = SipfAuthRequest(user_name, sizeof(user_name), password, sizeof(user_name));
         LOG_DBG("SipfAuthRequest(): %d", err);
         if (err < 0) {
             // IPアドレス認証に失敗した
-            UartBrokerPuts("Set AuthMode to `SIM Auth' faild...(Retry after 10s)");
+            UartBrokerPuts("faild(Retry after 10s)\r\n");
             k_sleep(K_MSEC(10000));
             continue;
         }
+        UartBrokerPuts("OK\r\n");
         break;
     }
     err = SipfClientHttpSetAuthInfo(user_name, password);
@@ -505,7 +450,7 @@ void main(void)
     UartBrokerPuts("+++ Ready +++\r\n");
     led_on(LED_STATE_PIN);
     ms_timeout = k_uptime_get() + LED_HEARTBEAT_MS;
-    
+
     int btn_prev = 0;
     uint32_t cnt_push_btn = 0;
     for (;;) {
@@ -527,19 +472,20 @@ void main(void)
 
                 SipfObjectObject obj[2];
                 SipfObjectOtid otid;
-
+                LOG_DBG("%d", cnt_push_btn);
                 obj[0].obj_tagid = 0x00;
                 obj[0].obj_type = OBJ_TYPE_UINT32;
-                obj[0].value = (uint8_t*)&cnt_push_btn;
+                obj[0].value = (uint8_t *)&cnt_push_btn;
                 obj[0].value_len = sizeof(cnt_push_btn);
 
                 obj[1].obj_tagid = 0x01;
                 obj[1].obj_type = OBJ_TYPE_STR_UTF8;
-                obj[1].value = (uint8_t*)"hello";
+                obj[1].value = (uint8_t *)"hello";
                 obj[1].value_len = 5;
-                
+
                 int payload_len = SipfObjectCreateObjUpPayload(work_buff, sizeof(work_buff), obj, 2);
                 if (payload_len > 0) {
+                    led_on(LED_STATE_PIN);
                     if (SipfObjClientObjUpRaw(work_buff, (uint16_t)payload_len, &otid) == 0) {
                         UartBrokerPuts("SUCCESS!\r\nOTID: ");
                         for (int i = 0; i < sizeof(SipfObjectOtid); i++) {
@@ -549,6 +495,7 @@ void main(void)
                     } else {
                         UartBrokerPuts("FAILED\r\n");
                     }
+                    led_off(LED_STATE_PIN);
                 }
             }
             btn_prev = btn_val;

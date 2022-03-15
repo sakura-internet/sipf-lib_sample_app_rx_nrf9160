@@ -1,0 +1,8 @@
+/ {
+	aliases {
+		led-boot = &led0;
+		led-state = &led1;
+
+		btn-send = &button2;
+	};
+};

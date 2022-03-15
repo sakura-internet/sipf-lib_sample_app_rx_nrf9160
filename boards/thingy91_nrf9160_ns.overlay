@@ -1,7 +1,8 @@
 / {
 	aliases {
-		led1 = &sense_red_led;
-		led2 = &sense_green_led;
-		led3 = &sense_blue_led;
+		led-boot = &blue_led;
+		led-state = &green_led;
+
+		btn-send = &button0;
 	};
 };
