@@ -5,7 +5,7 @@
 ### About
 
 This software is `Object TX sample' for Sakura's MONOPLATFORM.  
-Target divice are Nordic nRF9160DK and Nordic Thingy:91.
+Target divice are [Nordic nRF9160DK](https://www.nordicsemi.com/Products/Development-hardware/nRF9160-DK) and [Nordic Thingy:91](https://www.nordicsemi.com/Products/Development-hardware/Nordic-Thingy-91).
 
 ### Install nRF Connect SDK
 
@@ -43,7 +43,7 @@ board
 - nrf9160dk_nrf9160_ns
 - thingy91_nrf9160_ns
 
-For develop / SCM-LTEM1NRF and SCO-M5SNRF9160
+For Nordic nRF9160DK
 ```
 west build -b nrf9160dk_nrf9160_ns
 ```
