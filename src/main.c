@@ -41,9 +41,15 @@ LOG_MODULE_REGISTER(sipf, CONFIG_SIPF_LOG_LEVEL);
 #define LED_STATE_PIN (DT_GPIO_PIN(DT_ALIAS(led_state), gpios))
 #define LED_STATE_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led_state), gpios))
 
-#define BTN_SEND_PORT DT_GPIO_LABEL(DT_ALIAS(btn_send), gpios)
-#define BTN_SEND_PIN (DT_GPIO_PIN(DT_ALIAS(btn_send), gpios))
-#define BTN_SEND_FLAGS (GPIO_INPUT | DT_GPIO_FLAGS(DT_ALIAS(btn_send), gpios))
+#define LED_OUT1_PIN (DT_GPIO_PIN(DT_ALIAS(led_out1), gpios))
+#define LED_OUT1_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led_out1), gpios))
+
+#define LED_OUT2_PIN (DT_GPIO_PIN(DT_ALIAS(led_out2), gpios))
+#define LED_OUT2_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led_out2), gpios))
+
+#define BTN_RECV_PORT DT_GPIO_LABEL(DT_ALIAS(btn_recv), gpios)
+#define BTN_RECV_PIN (DT_GPIO_PIN(DT_ALIAS(btn_recv), gpios))
+#define BTN_RECV_FLAGS (GPIO_INPUT | DT_GPIO_FLAGS(DT_ALIAS(btn_recv), gpios))
 /**********/
 
 /** TLS **/
@@ -87,12 +93,12 @@ int at_comms_init(void)
 static int button_init(void)
 {
     const struct device *dev;
-    dev = device_get_binding(BTN_SEND_PORT);
+    dev = device_get_binding(BTN_RECV_PORT);
     if (dev == 0) {
         return 1;
     }
     int ret;
-    ret = gpio_pin_configure(dev, BTN_SEND_PIN, BTN_SEND_FLAGS);
+    ret = gpio_pin_configure(dev, BTN_RECV_PIN, BTN_RECV_FLAGS);
     if (ret != 0) {
         return ret;
     }
@@ -103,7 +109,7 @@ static int button_init(void)
 static int button_read(gpio_pin_t button)
 {
     const struct device *dev;
-    dev = device_get_binding(BTN_SEND_PORT);
+    dev = device_get_binding(BTN_RECV_PORT);
     if (dev == 0) {
         return 1;
     }
@@ -122,24 +128,30 @@ static int led_init(void)
         return 1;
     }
     int ret;
-    /* Initialize LED1  */
+    /* Initialize LED_BOOT  */
     ret = gpio_pin_configure(dev, LED_BOOT_PIN, LED_BOOT_FLAGS);
     LOG_DBG("gpio_pin_configure(%d): %d", LED_BOOT_PIN, ret);
     ret = gpio_pin_set(dev, LED_BOOT_PIN, 0);
     LOG_DBG("gpio_pin_set(%d): %d", LED_BOOT_PIN, ret);
 
-    /* Initialize LED2  */
+    /* Initialize LED_STATE  */
     ret = gpio_pin_configure(dev, LED_STATE_PIN, LED_STATE_FLAGS);
     LOG_DBG("gpio_pin_configure(%d): %d", LED_STATE_PIN, ret);
     ret = gpio_pin_set(dev, LED_STATE_PIN, 0);
     LOG_DBG("gpio_pin_set(%d): %d", LED_STATE_PIN, ret);
-#if 0
-    /* Initialize LED3  */
-    ret = gpio_pin_configure(dev, LED3_PIN, LED3_FLAGS);
-    LOG_DBG("gpio_pin_configure(%d): %d", LED3_PIN, ret);
-    ret = gpio_pin_set(dev, LED3_PIN, 0);
-    LOG_DBG("gpio_pin_set(%d): %d", LED3_PIN, ret);
-#endif
+
+    /* Initialize LED_OUT1  */
+    ret = gpio_pin_configure(dev, LED_OUT1_PIN, LED_OUT1_FLAGS);
+    LOG_DBG("gpio_pin_configure(%d): %d", LED_OUT1_PIN, ret);
+    ret = gpio_pin_set(dev, LED_OUT1_PIN, 0);
+    LOG_DBG("gpio_pin_set(%d): %d", LED_OUT1_PIN, ret);
+
+    /* Initialize LED_OUT2  */
+    ret = gpio_pin_configure(dev, LED_OUT2_PIN, LED_OUT2_FLAGS);
+    LOG_DBG("gpio_pin_configure(%d): %d", LED_OUT2_PIN, ret);
+    ret = gpio_pin_set(dev, LED_OUT2_PIN, 0);
+    LOG_DBG("gpio_pin_set(%d): %d", LED_OUT2_PIN, ret);
+
     return 0;
 }
 
@@ -452,7 +464,6 @@ void main(void)
     ms_timeout = k_uptime_get() + LED_HEARTBEAT_MS;
 
     int btn_prev = 0;
-    uint32_t cnt_push_btn = 0;
     for (;;) {
         // Heart Beat
         ms_now = k_uptime_get();
@@ -461,42 +472,76 @@ void main(void)
             led_state_toggle();
         }
 
-        int btn_val = button_read(BTN_SEND_PIN);
+        int btn_val = button_read(BTN_RECV_PIN);
         if (btn_val < 0) {
             LOG_ERR("button_read() failed.");
         } else {
             if ((btn_prev == 0) && (btn_val == 1)) {
-                UartBrokerPuts("Button Pushed\r\n");
-                // 送信ボタンが押された
-                cnt_push_btn++;
-
-                SipfObjectObject obj[2];
+                UartBrokerPuts("Receive Button Pushed\r\n");
+                // 受信ボタンが押された
                 SipfObjectOtid otid;
-                LOG_DBG("%d", cnt_push_btn);
-                obj[0].obj_tagid = 0x00;
-                obj[0].obj_type = OBJ_TYPE_UINT32;
-                obj[0].value = (uint8_t *)&cnt_push_btn;
-                obj[0].value_len = sizeof(cnt_push_btn);
+                uint8_t remain;
+                uint8_t qty;
+                uint8_t *p_objs[16], *p_datetime_user_send, *p_datetime_server_recv;
 
-                obj[1].obj_tagid = 0x01;
-                obj[1].obj_type = OBJ_TYPE_STR_UTF8;
-                obj[1].value = (uint8_t *)"hello";
-                obj[1].value_len = 5;
-
-                int payload_len = SipfObjectCreateObjUpPayload(work_buff, sizeof(work_buff), obj, 2);
-                if (payload_len > 0) {
-                    led_on(LED_STATE_PIN);
-                    if (SipfObjClientObjUpRaw(work_buff, (uint16_t)payload_len, &otid) == 0) {
-                        UartBrokerPuts("SUCCESS!\r\nOTID: ");
-                        for (int i = 0; i < sizeof(SipfObjectOtid); i++) {
-                            UartBrokerPrint("%02x", otid.value[i]);
+                led_on(LED_STATE_PIN);
+                for (;;) {
+                    int ret = SipfObjClientObjDown(&otid, &remain, &qty, p_objs, &p_datetime_user_send, &p_datetime_server_recv);
+                    if (ret == 0) {
+                        if (qty == 0) {
+                            // 受信するオブジェクトなし
+                            UartBrokerPuts("No object to receice.\r\n");
+                        } else {
+                            // 受信した
+                            UartBrokerPrint("Received. qty=%d\r\n", qty);
+                            for (int i = 0; i < qty; i++) {
+                                if (i >= 16) {
+                                    // リストのサイズ上限に達した
+                                    break;
+                                }
+                                SipfObjectObject obj;
+                                obj.value = work_buff;
+                                if (SipfObjectParse(p_objs[i], 255, &obj) == 0) {
+                                    UartBrokerPrint("tag: 0x%02x, type: 0x%02x\r\n", obj.obj_tagid, obj.obj_type);
+                                    //tag_id: 0x01ならLED_OUT1の点灯状態を設定する
+                                    if (obj.obj_tagid == 0x01) {
+                                        if (obj.obj_type == OBJ_TYPE_UINT8) {
+                                            if (*obj.value == 0) {
+                                                UartBrokerPuts("LED_OUT1: OFF\r\n");
+                                                led_off(LED_OUT1_PIN);
+                                            } else {
+                                                UartBrokerPuts("LED_OUT1: ON\r\n");
+                                                led_on(LED_OUT1_PIN);
+                                            }
+                                        }
+                                    }
+                                    //tag_id: 0x02ならLED_OUT2の点灯状態を設定する
+                                    if (obj.obj_tagid == 0x02) {
+                                        if (obj.obj_type == OBJ_TYPE_UINT8) {
+                                            if (*obj.value == 0) {
+                                                UartBrokerPuts("LED_OUT2: OFF\r\n");
+                                                led_off(LED_OUT2_PIN);
+                                            } else {
+                                                UartBrokerPuts("LED_OUT2: ON\r\n");
+                                                led_on(LED_OUT2_PIN);
+                                            }
+                                        }                                    
+                                    }
+                                } else {
+                                    UartBrokerPuts("Object parse failed...\r\n");
+                                }
+                            }
                         }
-                        UartBrokerPuts("\r\n");
+                        if (remain == 0) {
+                            UartBrokerPuts("Receive finished.\r\n");
+                            break;
+                        }
                     } else {
-                        UartBrokerPuts("FAILED\r\n");
+                        UartBrokerPrint("Receive failed: 0x%02x\r\n", ret);
+                        break;
                     }
-                    led_off(LED_STATE_PIN);
                 }
+                led_off(LED_STATE_PIN);
             }
             btn_prev = btn_val;
         }

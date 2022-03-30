@@ -1,10 +1,10 @@
-# sipf-lib_sample_app_tx_nrf9160
+# sipf-lib_sample_app_rx_nrf9160
 
 ## Getting start
 
 ### About
 
-This software is `Object TX sample' for Sakura's MONOPLATFORM.  
+This software is `Object RX sample' for Sakura's MONOPLATFORM.  
 Target divice are [Nordic nRF9160DK](https://www.nordicsemi.com/Products/Development-hardware/nRF9160-DK) and [Nordic Thingy:91](https://www.nordicsemi.com/Products/Development-hardware/Nordic-Thingy-91).
 
 ### Install nRF Connect SDK

@@ -12,7 +12,7 @@ set(ZEPHYR_EXTRA_MODULES
 )
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(sipf_app_sample)
+project(sipf_lib_sample_app_rx)
 
 target_sources(app PRIVATE
     src/main.c
