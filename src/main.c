@@ -3,24 +3,21 @@
  *
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  */
-
 #include <stdlib.h>
 #include <string.h>
-#include <zephyr.h>
 
-#include <modem/at_cmd.h>
-#include <modem/at_notif.h>
+#include <zephyr/kernel.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/logging/log.h>
+
+#include <nrf_modem_at.h>
 #include <modem/lte_lc.h>
 #include <modem/modem_info.h>
 #include <modem/modem_key_mgmt.h>
 #include <modem/nrf_modem_lib.h>
 #include <modem/pdn.h>
-#include <net/socket.h>
-#include <net/tls_credentials.h>
-#include <logging/log.h>
-
-#include <drivers/gpio.h>
-#include <power/reboot.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/net/tls_credentials.h>
 
 #include "sipf/sipf_client_http.h"
 #include "sipf/sipf_auth.h"
@@ -32,24 +29,12 @@ LOG_MODULE_REGISTER(sipf, CONFIG_SIPF_LOG_LEVEL);
 
 /** peripheral **/
 #define LED_HEARTBEAT_MS (500)
+static const struct gpio_dt_spec led_boot = GPIO_DT_SPEC_GET(DT_ALIAS(led_boot), gpios);
+static const struct gpio_dt_spec led_state = GPIO_DT_SPEC_GET(DT_ALIAS(led_state), gpios);
+static const struct gpio_dt_spec led_out1 = GPIO_DT_SPEC_GET(DT_ALIAS(led_out1), gpios);
+static const struct gpio_dt_spec led_out2 = GPIO_DT_SPEC_GET(DT_ALIAS(led_out2), gpios);
+static const struct gpio_dt_spec btn_recv = GPIO_DT_SPEC_GET(DT_ALIAS(btn_recv), gpios);
 
-#define LED_PORT DT_GPIO_LABEL(DT_ALIAS(led_boot), gpios)
-
-#define LED_BOOT_PIN (DT_GPIO_PIN(DT_ALIAS(led_boot), gpios))
-#define LED_BOOT_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led0), gpios))
-
-#define LED_STATE_PIN (DT_GPIO_PIN(DT_ALIAS(led_state), gpios))
-#define LED_STATE_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led_state), gpios))
-
-#define LED_OUT1_PIN (DT_GPIO_PIN(DT_ALIAS(led_out1), gpios))
-#define LED_OUT1_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led_out1), gpios))
-
-#define LED_OUT2_PIN (DT_GPIO_PIN(DT_ALIAS(led_out2), gpios))
-#define LED_OUT2_FLAGS (GPIO_OUTPUT_ACTIVE | DT_GPIO_FLAGS(DT_ALIAS(led_out2), gpios))
-
-#define BTN_RECV_PORT DT_GPIO_LABEL(DT_ALIAS(btn_recv), gpios)
-#define BTN_RECV_PIN (DT_GPIO_PIN(DT_ALIAS(btn_recv), gpios))
-#define BTN_RECV_FLAGS (GPIO_INPUT | DT_GPIO_FLAGS(DT_ALIAS(btn_recv), gpios))
 /**********/
 
 /** TLS **/
@@ -73,133 +58,42 @@ static char password[SZ_PASSWORD];
 /* Initialize AT communications */
 int at_comms_init(void)
 {
-    int err;
-
-    err = at_cmd_init();
-    if (err) {
-        LOG_ERR("Failed to initialize AT commands, err %d", err);
-        return err;
-    }
-
-    err = at_notif_init();
-    if (err) {
-        LOG_ERR("Failed to initialize AT notifications, err %d", err);
-        return err;
-    }
-
     return 0;
 }
 
 static int button_init(void)
 {
-    const struct device *dev;
-    dev = device_get_binding(BTN_RECV_PORT);
-    if (dev == 0) {
-        return 1;
+    if (!device_is_ready(btn_recv.port)) {
+        return -ENODEV;
     }
-    int ret;
-    ret = gpio_pin_configure(dev, BTN_RECV_PIN, BTN_RECV_FLAGS);
-    if (ret != 0) {
-        return ret;
-    }
+    gpio_pin_configure_dt(&btn_recv, GPIO_INPUT);
 
     return 0;
-}
-
-static int button_read(gpio_pin_t button)
-{
-    const struct device *dev;
-    dev = device_get_binding(BTN_RECV_PORT);
-    if (dev == 0) {
-        return 1;
-    }
-
-    return gpio_pin_get(dev, button);
 }
 
 /** LED **/
 static int led_init(void)
 {
-    const struct device *dev;
-
-    dev = device_get_binding(LED_PORT);
-    if (dev == 0) {
-        LOG_ERR("Nordic nRF GPIO driver was not found!");
-        return 1;
+    if (!device_is_ready(led_boot.port)) {
+        return -ENODEV;
     }
-    int ret;
-    /* Initialize LED_BOOT  */
-    ret = gpio_pin_configure(dev, LED_BOOT_PIN, LED_BOOT_FLAGS);
-    LOG_DBG("gpio_pin_configure(%d): %d", LED_BOOT_PIN, ret);
-    ret = gpio_pin_set(dev, LED_BOOT_PIN, 0);
-    LOG_DBG("gpio_pin_set(%d): %d", LED_BOOT_PIN, ret);
+    gpio_pin_configure_dt(&led_boot, GPIO_OUTPUT_INACTIVE);
 
-    /* Initialize LED_STATE  */
-    ret = gpio_pin_configure(dev, LED_STATE_PIN, LED_STATE_FLAGS);
-    LOG_DBG("gpio_pin_configure(%d): %d", LED_STATE_PIN, ret);
-    ret = gpio_pin_set(dev, LED_STATE_PIN, 0);
-    LOG_DBG("gpio_pin_set(%d): %d", LED_STATE_PIN, ret);
-
-    /* Initialize LED_OUT1  */
-    ret = gpio_pin_configure(dev, LED_OUT1_PIN, LED_OUT1_FLAGS);
-    LOG_DBG("gpio_pin_configure(%d): %d", LED_OUT1_PIN, ret);
-    ret = gpio_pin_set(dev, LED_OUT1_PIN, 0);
-    LOG_DBG("gpio_pin_set(%d): %d", LED_OUT1_PIN, ret);
-
-    /* Initialize LED_OUT2  */
-    ret = gpio_pin_configure(dev, LED_OUT2_PIN, LED_OUT2_FLAGS);
-    LOG_DBG("gpio_pin_configure(%d): %d", LED_OUT2_PIN, ret);
-    ret = gpio_pin_set(dev, LED_OUT2_PIN, 0);
-    LOG_DBG("gpio_pin_set(%d): %d", LED_OUT2_PIN, ret);
-
-    return 0;
-}
-
-static int led_on(gpio_pin_t pin)
-{
-    const struct device *dev = device_get_binding(LED_PORT);
-    if (dev == 0) {
-        LOG_ERR("Nordic nRF GPIO driver was not found!");
-        return 1;
+    if (!device_is_ready(led_state.port)) {
+        return -ENODEV;
     }
-    gpio_pin_set(dev, pin, 1);
-    return 0;
-}
+    gpio_pin_configure_dt(&led_state, GPIO_OUTPUT_INACTIVE);
 
-static int led_off(gpio_pin_t pin)
-{
-    const struct device *dev = device_get_binding(LED_PORT);
-    if (dev == 0) {
-        LOG_ERR("Nordic nRF GPIO driver was not found!");
-        return 1;
+    if (!device_is_ready(led_out1.port)) {
+        return -ENODEV;
     }
-    gpio_pin_set(dev, pin, 0);
-    return 0;
-}
+    gpio_pin_configure_dt(&led_out1, GPIO_OUTPUT_INACTIVE);
 
-static int led_toggle(gpio_pin_t pin)
-{
-    const struct device *dev;
-
-    dev = device_get_binding(LED_PORT);
-    if (dev == 0) {
-        LOG_ERR("Nordic nRF GPIO driver was not found!");
-        return 1;
+    if (!device_is_ready(led_out2.port)) {
+        return -ENODEV;
     }
-    gpio_pin_toggle(dev, pin);
-    return 0;
-}
+    gpio_pin_configure_dt(&led_out2, GPIO_OUTPUT_INACTIVE);
 
-static int led_state_toggle(void)
-{
-    const struct device *dev;
-
-    dev = device_get_binding(LED_PORT);
-    if (dev == 0) {
-        LOG_ERR("Nordic nRF GPIO driver was not found!");
-        return 1;
-    }
-    gpio_pin_toggle(dev, LED_STATE_PIN);
     return 0;
 }
 /***********/
@@ -212,9 +106,8 @@ static int cert_provision(void)
 {
     int err;
     bool exists;
-    uint8_t unused;
 
-    err = modem_key_mgmt_exists(TLS_SEC_TAG, MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN, &exists, &unused);
+    err = modem_key_mgmt_exists(TLS_SEC_TAG, MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN, &exists);
     if (err) {
         LOG_ERR("Failed to check for certificates err %d", err);
         return err;
@@ -274,19 +167,11 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 
 static int init_modem_and_lte(void)
 {
-    static char at_ret[128];
     int err = 0;
 
     err = nrf_modem_lib_init(NORMAL_MODE);
     if (err) {
         LOG_ERR("Failed to initialize modem library!");
-        return err;
-    }
-
-    /* Initialize AT comms in order to provision the certificate */
-    err = at_comms_init();
-    if (err) {
-        LOG_ERR("Faild to at_comms_init(): %d", err);
         return err;
     }
 
@@ -297,34 +182,8 @@ static int init_modem_and_lte(void)
         return err;
     }
 
-    err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_LTEM_GPS, LTE_LC_SYSTEM_MODE_PREFER_AUTO);
-    if (err) {
-        LOG_ERR("Failed to System Mode set.");
-        return err;
-    }
-    LOG_DBG("Setting system mode OK");
-
-    err = at_cmd_write("AT\%XMAGPIO=1,0,0,1,1,1574,1577", NULL, 0, NULL);
-    if (err != 0) {
-        LOG_ERR("Failed to set XMAGPIO, err %d", err);
-        return err;
-    }
-    LOG_DBG("Configure MAGPIO OK");
-
-    err = at_cmd_write("AT\%XCOEX0=1,1,1565,1586", NULL, 0, NULL);
-    if (err != 0) {
-        LOG_ERR("Failed to set XCOEX0, err %d", err);
-        return err;
-    }
-    LOG_DBG("Configure pin OK");
-
     /* PDN */
     uint8_t cid;
-    err = pdn_init();
-    if (err != 0) {
-        LOG_ERR("Failed to pdn_init()");
-        return err;
-    }
     err = pdn_ctx_create(&cid, NULL);
     if (err != 0) {
         LOG_ERR("Failed to pdn_ctx_create(), err %d", err);
@@ -339,7 +198,6 @@ static int init_modem_and_lte(void)
     LOG_DBG("Setting APN OK");
 
     /* CONNECT */
-    enum at_cmd_state at_state;
     for (int i = 0; i < REGISTER_TRY; i++) {
         LOG_DBG("Initialize LTE");
         err = lte_lc_init();
@@ -374,22 +232,6 @@ static int init_modem_and_lte(void)
             } else {
                 LOG_DBG("PSM is enabled");
             }
-
-            // ICCIDの取得
-            err = at_cmd_write("AT%XICCID", at_ret, sizeof(at_ret), &at_state);
-            if (err) {
-                LOG_ERR("Failed to get ICCID, err %d", err);
-                return err;
-            }
-            if (at_state == AT_CMD_OK) {
-                char *iccid_top = &at_ret[9]; // ICCIDの先頭
-                for (int i = 0; i < 20; i++) {
-                    if (iccid_top[i] == 'F') {
-                        iccid_top[i] = 0x00;
-                    }
-                }
-                UartBrokerPrint("ICCID: %s\r\n", iccid_top);
-            }
             return 0;
         } else {
             //
@@ -411,9 +253,10 @@ void main(void)
     int64_t ms_now, ms_timeout;
 
     // UartBrokerの初期化(以降、Debug系の出力も可能)
-    uart_dev = device_get_binding(UART_LABEL);
+    uart_dev = DEVICE_DT_GET(UART_LABEL);
     UartBrokerInit(uart_dev);
     UartBrokerPrint("*** SIPF SDK Sample for nRFConnect\r\n");
+
 #ifdef CONFIG_LTE_LOCK_PLMN
     UartBrokerPuts("* PLMN: " CONFIG_LTE_LOCK_PLMN_STRING "\r\n");
 #endif
@@ -425,11 +268,11 @@ void main(void)
 #endif
     // LEDの初期化
     led_init();
-    led_on(LED_BOOT_PIN);
+    gpio_pin_set_dt(&led_boot, 1);
 
     // ボタンの初期化
     if (button_init() != 0) {
-        led_off(LED_BOOT_PIN);
+        gpio_pin_set_dt(&led_boot,0);
         goto err;
     }
 
@@ -460,7 +303,7 @@ void main(void)
     }
 
     UartBrokerPuts("+++ Ready +++\r\n");
-    led_on(LED_STATE_PIN);
+    gpio_pin_set_dt(&led_state, 1);
     ms_timeout = k_uptime_get() + LED_HEARTBEAT_MS;
 
     int btn_prev = 0;
@@ -469,10 +312,10 @@ void main(void)
         ms_now = k_uptime_get();
         if ((ms_timeout - ms_now) < 0) {
             ms_timeout = ms_now + LED_HEARTBEAT_MS;
-            led_state_toggle();
+            gpio_pin_toggle_dt(&led_state);
         }
 
-        int btn_val = button_read(BTN_RECV_PIN);
+        int btn_val = gpio_pin_get_dt(&btn_recv);
         if (btn_val < 0) {
             LOG_ERR("button_read() failed.");
         } else {
@@ -484,7 +327,7 @@ void main(void)
                 uint8_t qty;
                 uint8_t *p_objs[16], *p_datetime_user_send, *p_datetime_server_recv;
 
-                led_on(LED_STATE_PIN);
+                gpio_pin_set_dt(&led_state, 1);
                 for (;;) {
                     int ret = SipfObjClientObjDown(&otid, &remain, &qty, p_objs, &p_datetime_user_send, &p_datetime_server_recv);
                     if (ret == 0) {
@@ -508,10 +351,10 @@ void main(void)
                                         if (obj.obj_type == OBJ_TYPE_UINT8) {
                                             if (*obj.value == 0) {
                                                 UartBrokerPuts("LED_OUT1: OFF\r\n");
-                                                led_off(LED_OUT1_PIN);
+                                                gpio_pin_set_dt(&led_out1, 0);
                                             } else {
                                                 UartBrokerPuts("LED_OUT1: ON\r\n");
-                                                led_on(LED_OUT1_PIN);
+                                                gpio_pin_set_dt(&led_out1, 1);
                                             }
                                         }
                                     }
@@ -520,10 +363,10 @@ void main(void)
                                         if (obj.obj_type == OBJ_TYPE_UINT8) {
                                             if (*obj.value == 0) {
                                                 UartBrokerPuts("LED_OUT2: OFF\r\n");
-                                                led_off(LED_OUT2_PIN);
+                                                gpio_pin_set_dt(&led_out2, 0);
                                             } else {
                                                 UartBrokerPuts("LED_OUT2: ON\r\n");
-                                                led_on(LED_OUT2_PIN);
+                                                gpio_pin_set_dt(&led_out2, 1);
                                             }
                                         }                                    
                                     }
@@ -541,7 +384,7 @@ void main(void)
                         break;
                     }
                 }
-                led_off(LED_STATE_PIN);
+                gpio_pin_set_dt(&led_state, 0);
             }
             btn_prev = btn_val;
         }
@@ -550,7 +393,7 @@ void main(void)
     }
 err:
     for (;;) {
-        led_toggle(LED_BOOT_PIN);
+        gpio_pin_toggle_dt(&led_boot);
         k_sleep(K_MSEC(100));
     }
 }
